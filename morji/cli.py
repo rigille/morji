@@ -55,6 +55,7 @@ def coqtop_stream(arguments: List[str], child):
     user_fd = sys.stdin.fileno()
     out_fd = child.stdout.fileno()
     err_fd = child.stderr.fileno()
+    incomplete_line = b""
     fds = [child_fd, err_fd, out_fd, user_fd]
     for fd in fds:
         os.set_blocking(fd, False)
@@ -82,7 +83,11 @@ def coqtop_stream(arguments: List[str], child):
                 content = sys.stdin.read().encode('utf-8')
                 if content:
                     origin = InputOrigin.User
-                    yield Data(content, origin)
+                    content = incomplete_line + content
+                    lines = content.split(b'\n')
+                    for line in lines[:-1]:
+                        yield Data(line + b'\n', origin)
+                    incomplete_line = lines[-1]
                 else:
                     child.stdin.close()
                     running = False
