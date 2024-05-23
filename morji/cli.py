@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess as sp
+from collections import deque
 from enum import Enum
 from select import select
 from dataclasses import dataclass
@@ -22,19 +23,31 @@ def main(arguments: List[str]) -> None:
 def coqtop(arguments: List[str]) -> None:
     child = sp.Popen(arguments, stdin=sp.PIPE,
                      stdout=sp.PIPE, stderr=sp.PIPE)
+    state = deque()
     for event in coqtop_stream(arguments, child):
-        print(event)
-        match event:
-            case ChildExit(status):
+        print(event, state)
+        match (event, state):
+            case (ChildExit(status), _):
                 break
-            case Data(content, origin):
-                if origin == InputOrigin.User:
-                    child.stdin.write(content)
-                    child.stdin.flush()
-                else:
-                    payload = content.decode('utf-8')
-                    sys.stderr.write(payload)
-                    sys.stderr.flush()
+            case (Data(content, InputOrigin.User), None):
+                child.stdin.write(content)
+                child.stdin.flush()
+                state = deque()
+            case (Data(content, InputOrigin.User), _):
+                state.append(content)
+            case (Data(content, InputOrigin.ChildStderr), _):
+                if content == b'\nCoq < ':
+                    if isinstance(state, deque):
+                        if not state:
+                            state = None
+                        else:
+                            child.stdin.write(state.popleft())
+                            child.stdin.flush()
+                    else:
+                        assert False, f"illegal state for prompt: {state}"
+                payload = content.decode('utf-8')
+                sys.stderr.write(payload)
+                sys.stderr.flush()
 
 @dataclass(slots=True)
 class ChildExit:
