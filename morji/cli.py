@@ -5,6 +5,7 @@ from collections import deque
 from enum import Enum
 from select import select
 from dataclasses import dataclass
+from typing import Optional
 
 import sigchld
 
@@ -20,34 +21,51 @@ def main(arguments: List[str]) -> None:
     else:
         print('Usage: morji [repl command] >> target_file')
 
+@dataclass(slots=True)
+class State:
+    queue: Optional[deque]
+    staged: str
+    committed: str
+
 def coqtop(arguments: List[str]) -> None:
     child = sp.Popen(arguments, stdin=sp.PIPE,
                      stdout=sp.PIPE, stderr=sp.PIPE)
-    state = deque()
+    state = State(deque(), b'', b'')
     for event in coqtop_stream(arguments, child):
-        print(event, state)
+        print(event)
         match (event, state):
             case (ChildExit(status), _):
+                if status == 0:
+                    sys.stdout.write(state.committed.decode('utf-8'))
+                    sys.stdout.flush()
                 break
-            case (Data(content, InputOrigin.User), None):
+            case (Data(content, InputOrigin.User), State(None, _, _)):
                 child.stdin.write(content)
                 child.stdin.flush()
-                state = deque()
+                state.queue = deque()
+                state.staged += content
             case (Data(content, InputOrigin.User), _):
-                state.append(content)
-            case (Data(content, InputOrigin.ChildStderr), _):
-                if content == b'\nCoq < ':
-                    if isinstance(state, deque):
-                        if not state:
-                            state = None
+                state.queue.append(content)
+            case (Data(content, origin), _):
+                if (content == b'\nCoq < '\
+                        or content == b'Coq < ')\
+                        and origin is InputOrigin.ChildStderr:
+                    if isinstance(state.queue, deque):
+                        if not state.queue:
+                            state.queue = None
                         else:
-                            child.stdin.write(state.popleft())
+                            child.stdin.write(state.queue.popleft())
                             child.stdin.flush()
                     else:
-                        assert False, f"illegal state for prompt: {state}"
+                        assert False, f'illegal state for prompt: {state}'
+                else:
+                    if origin is InputOrigin.ChildStdout:
+                        state.committed += state.staged
+                    state.staged = b''
                 payload = content.decode('utf-8')
                 sys.stderr.write(payload)
                 sys.stderr.flush()
+        print(state)
 
 @dataclass(slots=True)
 class ChildExit:
