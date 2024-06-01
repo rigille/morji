@@ -31,8 +31,9 @@ def coqtop(arguments: List[str]) -> None:
     child = sp.Popen(arguments, stdin=sp.PIPE,
                      stdout=sp.PIPE, stderr=sp.PIPE)
     state = State(deque(), b'', b'')
+    #print(state)
     for event in coqtop_stream(arguments, child):
-        print(event)
+        #print(event)
         match (event, state):
             case (ChildExit(status), _):
                 if status == 0:
@@ -47,25 +48,23 @@ def coqtop(arguments: List[str]) -> None:
             case (Data(content, InputOrigin.User), _):
                 state.queue.append(content)
             case (Data(content, origin), _):
-                if (content == b'\nCoq < '\
-                        or content == b'Coq < ')\
-                        and origin is InputOrigin.ChildStderr:
-                    if isinstance(state.queue, deque):
-                        if not state.queue:
-                            state.queue = None
-                        else:
-                            child.stdin.write(state.queue.popleft())
-                            child.stdin.flush()
+                if origin is InputOrigin.ChildStderr:
+                    if content.endswith(b' < '):
+                        if isinstance(state.queue, deque):
+                            if not state.queue:
+                                state.queue = None
+                            else:
+                                child.stdin.write(state.queue.popleft())
+                                child.stdin.flush()
                     else:
                         assert False, f'illegal state for prompt: {state}'
                 else:
-                    if origin is InputOrigin.ChildStdout:
-                        state.committed += state.staged
-                    state.staged = b''
+                    state.committed += state.staged
+                state.staged = b''
                 payload = content.decode('utf-8')
                 sys.stderr.write(payload)
                 sys.stderr.flush()
-        print(state)
+        #print(state)
 
 @dataclass(slots=True)
 class ChildExit:
@@ -87,7 +86,7 @@ def coqtop_stream(arguments: List[str], child):
     out_fd = child.stdout.fileno()
     err_fd = child.stderr.fileno()
     incomplete_line = b""
-    fds = [child_fd, err_fd, out_fd, user_fd]
+    fds = [child_fd, out_fd, err_fd, user_fd]
     for fd in fds:
         os.set_blocking(fd, False)
     running = True
@@ -120,9 +119,9 @@ def coqtop_stream(arguments: List[str], child):
                         yield Data(line + b'\n', origin)
                     incomplete_line = lines[-1]
                 else:
-                    child.stdin.close()
                     running = False
             else:
                 assert False, "Unknown file descriptor " \
                               "in coqtop_stream"
+    os.set_blocking(user_fd, True)
     yield ChildExit(child.wait())
