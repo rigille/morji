@@ -30,7 +30,7 @@
                     mkdir -p $out/bin
                     cp -r morji $out/
                     echo '#!/bin/sh' > $out/bin/morji
-                    echo ${python}' '$out'/morji $@' >> $out/bin/morji
+                    echo ${python}'/bin/python3 '$out'/morji $@' >> $out/bin/morji
                     chmod +x $out/bin/morji
                 '';
             };
