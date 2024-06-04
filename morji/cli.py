@@ -11,6 +11,8 @@ import sigchld
 
 from typing import List
 
+debugging = bool(os.getenv('MORJI_DEBUG'))
+
 def main(arguments: List[str]) -> None:
     if arguments:
         match repl := arguments[0]:
@@ -31,9 +33,9 @@ def coqtop(arguments: List[str]) -> None:
     child = sp.Popen(arguments, stdin=sp.PIPE,
                      stdout=sp.PIPE, stderr=sp.PIPE)
     state = State(deque(), b'', b'')
-    #print(state)
+    print(state) if debugging else None
     for event in coqtop_stream(arguments, child):
-        #print(event)
+        print(event) if debugging else None
         match (event, state):
             case (ChildExit(status), _):
                 if status == 0:
@@ -50,6 +52,8 @@ def coqtop(arguments: List[str]) -> None:
             case (Data(content, origin), _):
                 if origin is InputOrigin.ChildStderr:
                     if content.endswith(b' < '):
+                        if content.count(b'\n') <= 1:
+                            state.committed += state.staged
                         if isinstance(state.queue, deque):
                             if not state.queue:
                                 state.queue = None
@@ -64,7 +68,7 @@ def coqtop(arguments: List[str]) -> None:
                 payload = content.decode('utf-8')
                 sys.stderr.write(payload)
                 sys.stderr.flush()
-        #print(state)
+        print(state) if debugging else None
 
 @dataclass(slots=True)
 class ChildExit:
@@ -123,5 +127,6 @@ def coqtop_stream(arguments: List[str], child):
             else:
                 assert False, "Unknown file descriptor " \
                               "in coqtop_stream"
+    child.stdin.close()
     os.set_blocking(user_fd, True)
     yield ChildExit(child.wait())
